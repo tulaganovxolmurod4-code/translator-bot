@@ -1,4 +1,5 @@
-aiogram==3.4.1
-googletrans==4.0.2
-gtts==2.5.3
+aiogram
+googletrans
+gtts
+
 
