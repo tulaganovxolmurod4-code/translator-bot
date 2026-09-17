@@ -5,7 +5,7 @@ from aiogram.filters import Command
 from googletrans import Translator
 from gtts import gTTS
 
-TOKEN = 8463584105:AAH96f0W5yCkKNvh7uXeJ0ZXMF79RmP5zHE
+TOKEN = os.getenv("BOT_TOKEN")
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
