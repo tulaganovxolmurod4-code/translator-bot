@@ -28,8 +28,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 SIM5_API_KEY = os.getenv("SIM5_API_KEY", "")
 
 # Shu yerga o'z karta raqamingiz va F.I.O. ni yozib qo'ying:
-MY_CARD_NUMBER = "8600 1234 5678 9012"
-MY_CARD_HOLDER = "FALONCHI FALONCHIYEV"
+MY_CARD_NUMBER = "5614681804146078"
+MY_CARD_HOLDER = "Tulaganov Xolmurod"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
