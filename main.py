@@ -9,7 +9,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from googletrans import Translator
 from gtts import gTTS
 
-# 1. Render uchun oddiy Flask server (24/7 ishlashi uchun)
 app = Flask('')
 
 @app.route('/')
@@ -23,7 +22,6 @@ def keep_alive():
     t = Thread(target=run_flask)
     t.start()
 
-# 2. Asosiy Telegram bot sozlamalari
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789")) # O'zingizning Telegram ID raqamingizni yozing
 
@@ -37,7 +35,6 @@ user_states = {}
 user_balances = {}
 admin_total_revenue = 0.0  # Admin balansi (tushgan pullar)
 
-# Asosiy menyu tugmalari
 def get_main_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="🌐 Tarjimon", callback_data="menu_translator")
@@ -62,6 +59,7 @@ async def start_command(message: types.Message):
 
 @dp.callback_query()
 async def callback_handler(callback: types.CallbackQuery):
+    global admin_total_revenue
     user_id = callback.from_user.id
     data = callback.data
 
@@ -74,7 +72,6 @@ async def callback_handler(callback: types.CallbackQuery):
             parse_mode="Markdown"
         )
     elif data == "menu_numbers":
-        # Admin uchun tekin raqam olish imkoniyati, oddiy foydalanuvchilar uchun sotib olish
         if user_id == ADMIN_ID:
             await callback.message.answer(
                 "📱 **Virtual raqam sotib olish (Admin Rejimi):**\n\n"
@@ -98,7 +95,6 @@ async def callback_handler(callback: types.CallbackQuery):
         )
     elif data == "menu_admin":
         if user_id == ADMIN_ID:
-            global admin_total_revenue
             await callback.message.answer(
                 f"⚙️ **Admin Panel**\n\n"
                 f"📥 Tushgan umumiy mablag': **{admin_total_revenue:,.2f} so'm**\n\n"
@@ -113,7 +109,6 @@ async def callback_handler(callback: types.CallbackQuery):
             
     elif data == "admin_withdraw":
         if user_id == ADMIN_ID:
-            global admin_total_revenue
             if admin_total_revenue > 0:
                 withdrawn = admin_total_revenue
                 admin_total_revenue = 0.0
