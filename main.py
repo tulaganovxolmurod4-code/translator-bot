@@ -27,6 +27,10 @@ TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 SIM5_API_KEY = os.getenv("SIM5_API_KEY", "")
 
+# Shu yerga o'z karta raqamingiz va F.I.O. ni yozib qo'ying:
+MY_CARD_NUMBER = "8600 1234 5678 9012"
+MY_CARD_HOLDER = "FALONCHI FALONCHIYEV"
+
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -36,30 +40,26 @@ user_states = {}
 user_balances = {}
 admin_total_revenue = 0.0
 
-# ==========================================
-# 📱 TELEGRAM RAQAMLARI VA 10,000 SO'MLIK NARXLAR
-# ==========================================
 COUNTRY_PRICES = {
     "russia": {
         "name": "🇷🇺 Rossiya raqami",
         "country_code": "russia",
-        "retail_price": 10000.0,   # Mijoz to'laydigan narx
-        "wholesale_cost": 2500.0   # 5SIM yechadigan tan narxi
+        "retail_price": 10000.0,
+        "wholesale_cost": 2500.0
     },
     "kazakhstan": {
         "name": "🇰🇿 Qozog'iston raqami",
         "country_code": "kazakhstan",
-        "retail_price": 10000.0,   # Mijoz to'laydigan narx
-        "wholesale_cost": 3500.0   # 5SIM yechadigan tan narxi
+        "retail_price": 10000.0,
+        "wholesale_cost": 3500.0
     },
     "usa": {
         "name": "🇺🇸 AQSh (USA) raqami",
         "country_code": "usa",
-        "retail_price": 10000.0,   # Mijoz to'laydigan narx
-        "wholesale_cost": 7000.0   # 5SIM yechadigan tan narxi
+        "retail_price": 10000.0,
+        "wholesale_cost": 7000.0
     }
 }
-# ==========================================
 
 def get_main_menu():
     builder = InlineKeyboardBuilder()
@@ -130,7 +130,7 @@ async def callback_handler(callback: types.CallbackQuery):
                 "⏳ 5SIM API orqali raqam so'ralmoqda..."
             )
             if not SIM5_API_KEY:
-                await callback.message.answer("⚠️ SIM5_API_KEY topilmadi! Render muhitiga 5SIM API kalitingizni kiriting.")
+                await callback.message.answer("⚠️ SIM5_API_KEY topilmadi!")
                 return
 
             url = f"https://5sim.net/v1/user/buy/activation/{c_code}/any/telegram"
@@ -145,11 +145,7 @@ async def callback_handler(callback: types.CallbackQuery):
                         await callback.message.answer(f"✅ Admin uchun 5SIM raqami olindi!\n📱 Raqam: `+{phone}`\n🆔 Buyurtma ID: `{order_id}`", parse_mode="Markdown")
                     else:
                         err_text = await response.text()
-                        await callback.message.answer(
-                            f"❌ 5SIM xatoligi: {err_text}\n\n"
-                            "💡 *Eslatma:* 5SIM akkauntingizda yetarli mablag' borligiga e'tibor bering!",
-                            parse_mode="Markdown"
-                        )
+                        await callback.message.answer(f"❌ 5SIM xatoligi: {err_text}", parse_mode="Markdown")
         else:
             balance = user_balances.get(user_id, 0.0)
             if balance >= price:
@@ -179,11 +175,7 @@ async def callback_handler(callback: types.CallbackQuery):
                             )
                         else:
                             err_text = await response.text()
-                            await callback.message.answer(
-                                f"⚠️ Hozirda raqam olishda xatolik yuz berdi: {err_text}\n\n"
-                                "💡 *Eslatma:* 5SIM balansingiz yetarli ekanligini tekshiring.",
-                                parse_mode="Markdown"
-                            )
+                            await callback.message.answer(f"⚠️ Hozirda raqam olishda xatolik yuz berdi: {err_text}", parse_mode="Markdown")
             else:
                 await callback.message.answer(
                     f"⚠️ Balansingiz yetarli emas!\n"
@@ -196,30 +188,20 @@ async def callback_handler(callback: types.CallbackQuery):
         balance = user_balances.get(user_id, 0.0)
         await callback.message.answer(f"💰 Sizning balansingiz: **{balance:,.2f} so'm**", parse_mode="Markdown")
     elif data == "menu_topup":
+        card_text = (
+            f"💳 **Hisobni to'ldirish (Plastik karta orqali):**\n\n"
+            f"Quyidagi karta raqamiga kerakli summani o'tkazing (Uzcard / Humo):\n\n"
+            f"Karta raqami: `{MY_CARD_NUMBER}`\n"
+            f"Karta egasi: **{MY_CARD_HOLDER}**\n\n"
+            f"⚠️ **Diqqat:** Karta raqamini ustiga bosib nusxalab olishingiz mumkin. "
+            f"Pulni o'tkazgach, balansni faollashtirish uchun quyidagi test tugmasidan ham foydalanishingiz mumkin:"
+        )
         builder = InlineKeyboardBuilder()
-        builder.button(text="💳 Payme / Click / Uzum orqali to'lash (10,000 so'm)", callback_data="pay_online_10000")
-        builder.button(text="➕ 10,000 so'm qo'shish (Test)", callback_data="topup_test")
+        builder.button(text="➕ 10,000 so'm qo'shish (Sinov)", callback_data="topup_test")
         builder.button(text="🔙 Ortga", callback_data="menu_back")
         builder.adjust(1)
         
-        await callback.message.answer(
-            "💳 **Hisobni to'ldirish:**\n\n"
-            "Kartangiz (Uzcard, Humo, Visa) orqali yoki to'lov tizimlari orqali avtomatik to'ldirish uchun pastdagi tugmani bosing:",
-            reply_markup=builder.as_markup(),
-            parse_mode="Markdown"
-        )
-    elif data == "pay_online_10000":
-        # Telegram invoice through native provider or payment gateway link simulation
-        prices = [types.LabeledPrice(label="Balansni to'ldirish (10,000 so'm)", amount=1000000)] # amount in tyin/cents depending on provider
-        await callback.message.answer_invoice(
-            title="Hisobni to'ldirish",
-            description="Bot balansingizga 10,000 so'm qo'shish uchun to'lov",
-            payload="topup_10000",
-            provider_token="", # Use provider token if connected via BotFather, or test payload
-            currency="UZS",
-            prices=prices,
-            start_parameter="topup-balance"
-        )
+        await callback.message.answer(card_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
     elif data == "topup_test":
         if user_id not in user_balances:
             user_balances[user_id] = 0.0
@@ -253,23 +235,6 @@ async def callback_handler(callback: types.CallbackQuery):
         await callback.message.answer("Asosiy menyu:", reply_markup=get_main_menu())
         
     await callback.answer()
-
-@dp.pre_checkout_query()
-async def pre_checkout_query(pre_checkout_query: types.PreCheckoutQuery):
-    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
-
-@dp.message(lambda message: message.successful_payment is not None)
-async def successful_payment(message: types.Message):
-    user_id = message.from_user.id
-    if user_id not in user_balances:
-        user_balances[user_id] = 0.0
-    user_balances[user_id] += 10000.0
-    await message.answer(
-        f"✅ To'lov muvaffaqiyatli amalga oshirildi!\n"
-        f"Hisobingizga **10,000 so'm** qo'shildi.\n"
-        f"Joriy balans: **{user_balances[user_id]:,.2f} so'm**",
-        parse_mmode="Markdown"
-    )
 
 @dp.message()
 async def handle_text(message: types.Message):
