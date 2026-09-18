@@ -1,12 +1,28 @@
-from keep_alive import keep_alive
 import os
 import logging
+import asyncio
+from flask import Flask
+from threading import Thread
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from googletrans import Translator
 from gtts import gTTS
 
-keep_alive()
+# 1. Render uchun oddiy Flask server (UptimeRobot uxlashiga yo'l qo'ymaydi)
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is active and running 24/7!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
+
+# 2. Asosiy Telegram bot sozlamalari
 TOKEN = os.getenv("BOT_TOKEN")
 
 logging.basicConfig(level=logging.INFO)
@@ -59,7 +75,10 @@ async def translate_text(message: types.Message):
         await message.answer(f"Xatolik yuz berdi: {e}")
 
 if __name__ == "__main__":
-    import asyncio
+    # Flask serverni fon rejimida ishga tushiramiz
+    keep_alive()
+    
+    # Botni ishga tushiramiz
     async def main():
         await dp.start_polling(bot)
     
