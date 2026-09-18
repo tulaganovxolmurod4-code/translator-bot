@@ -15,10 +15,10 @@ dp = Dispatcher()
 translator = Translator()
 
 @dp.message(Command("start"))
-async def start_cmd(message: types.Message):
+async def start_command(message: types.Message):
     await message.answer(
         "Salom! Men tarjimon botman.\n\n"
-        "Menga istalgan o'zbekcha matn yuboring — uni inglizchaga tarjima qilib, ovozli xabar ham tashlab beraman.\n"
+        "Menga istalgan o'zbekcha matn yuboring — inglizchaga tarjima qilaman.\n"
         "Yoki inglizcha yozing — o'zbekchaga tarjima qilaman!"
     )
 
@@ -29,26 +29,25 @@ async def translate_text(message: types.Message):
         return
 
     try:
-        detection = translator.detect(text)
+        detection = await translator.detect(text)
         src_lang = detection.lang
 
         if src_lang == 'uz':
             dest_lang = 'en'
-            translated = translator.translate(text, src='uz', dest='en')
             audio_lang = 'en'
         else:
             dest_lang = 'uz'
-            translated = translator.translate(text, dest='uz')
             audio_lang = 'uz'
 
-        translated_text = translated.text
+        translation = await translator.translate(text, dest=dest_lang)
+        translated_text = translation.text
 
         tts = gTTS(text=translated_text, lang=audio_lang)
         audio_path = "voice.mp3"
         tts.save(audio_path)
 
         await message.answer(f"<b>Tarjima:</b> {translated_text}", parse_mode="HTML")
-        
+
         audio_file = types.FSInputFile(audio_path)
         await message.answer_voice(voice=audio_file)
 
@@ -56,11 +55,12 @@ async def translate_text(message: types.Message):
             os.remove(audio_path)
 
     except Exception as e:
+        logging.error(f"Xatolik: {e}")
         await message.answer(f"Xatolik yuz berdi: {e}")
-
-async def main():
-    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     import asyncio
+    async def main():
+        await dp.start_polling(bot)
+    
     asyncio.run(main())
