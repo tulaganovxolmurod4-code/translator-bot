@@ -27,7 +27,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 SIM5_API_KEY = os.getenv("SIM5_API_KEY", "")
 
-# Shu yerga o'z karta raqamingiz va F.I.O. ni yozib qo'ying:
+# Sizning karta raqamingiz va F.I.O.
 MY_CARD_NUMBER = "5614681804146078"
 MY_CARD_HOLDER = "Tulaganov Xolmurod"
 
@@ -188,25 +188,20 @@ async def callback_handler(callback: types.CallbackQuery):
         balance = user_balances.get(user_id, 0.0)
         await callback.message.answer(f"💰 Sizning balansingiz: **{balance:,.2f} so'm**", parse_mode="Markdown")
     elif data == "menu_topup":
+        user_states[user_id] = "waiting_for_receipt"
         card_text = (
             f"💳 **Hisobni to'ldirish (Plastik karta orqali):**\n\n"
             f"Quyidagi karta raqamiga kerakli summani o'tkazing (Uzcard / Humo):\n\n"
             f"Karta raqami: `{MY_CARD_NUMBER}`\n"
             f"Karta egasi: **{MY_CARD_HOLDER}**\n\n"
-            f"⚠️ **Diqqat:** Karta raqamini ustiga bosib nusxalab olishingiz mumkin. "
-            f"Pulni o'tkazgach, balansni faollashtirish uchun quyidagi test tugmasidan ham foydalanishingiz mumkin:"
+            f"⚠️ **Diqqat:** Karta raqamining ustiga bosib nusxalab olishingiz mumkin.\n\n"
+            f"📸 Pulni o'tkazgach, to'lov cheki (skrinshot) yoki rasmini shu chatga yuboring. Shundan so'ng administrator tomonidan tasdiqlanib balansingizga mablag' qo'shiladi!"
         )
         builder = InlineKeyboardBuilder()
-        builder.button(text="➕ 10,000 so'm qo'shish (Sinov)", callback_data="topup_test")
         builder.button(text="🔙 Ortga", callback_data="menu_back")
         builder.adjust(1)
         
         await callback.message.answer(card_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
-    elif data == "topup_test":
-        if user_id not in user_balances:
-            user_balances[user_id] = 0.0
-        user_balances[user_id] += 10000.0
-        await callback.message.answer(f"✅ Balansingizga 10,000 so'm qo'shildi!\nJoriy balans: **{user_balances[user_id]:,.2f} so'm**", parse_mode="Markdown")
     elif data == "menu_admin":
         if user_id == ADMIN_ID:
             await callback.message.answer(
@@ -231,7 +226,26 @@ async def callback_handler(callback: types.CallbackQuery):
                 await callback.message.answer(f"✅ Muvaffaqiyatli! {withdrawn:,.2f} so'm mablag' kartangizga yechish uchun navbatga qo'yildi.")
             else:
                 await callback.message.answer("⚠️ Balansingizda yechib olish uchun mablag' mavjud emas.")
+    elif data.startswith("approve_topup_"):
+        if user_id == ADMIN_ID:
+            target_user_id = int(data.replace("approve_topup_", ""))
+            topup_amount = 10000.0  # Yoki so'ralgan summa
+            if target_user_id not in user_balances:
+                user_balances[target_user_id] = 0.0
+            user_balances[target_user_id] += topup_amount
+            
+            await callback.message.edit_caption(
+                caption=callback.message.caption + "\n\n✅ **TASDIQLANDI (Balans qo'shildi)**",
+                parse_mode="Markdown"
+            )
+            await bot.send_message(
+                target_user_id,
+                f"✅ **Balansingizga 10,000 so'm qo'shildi!**\nJoriy balans: **{user_balances[target_user_id]:,.2f} so'm**",
+                parse_mode="Markdown"
+            )
+            await callback.answer("Muvaffaqiyatli tasdiqlandi!")
     elif data == "menu_back":
+        user_states[user_id] = None
         await callback.message.answer("Asosiy menyu:", reply_markup=get_main_menu())
         
     await callback.answer()
@@ -275,6 +289,24 @@ async def handle_text(message: types.Message):
         except Exception as e:
             logging.error(f"Xatolik: {e}")
             await message.answer(f"Xatolik yuz berdi: {e}")
+            
+    elif state == "waiting_for_receipt":
+        if message.photo or message.document:
+            user_states[user_id] = None
+            await message.answer("✅ Chekingiz qabul qilindi! Admin tomonidan tekshirilib, tez orada balansingizga pul qo'shiladi.")
+            
+            # Adminga yuborish
+            builder = InlineKeyboardBuilder()
+            builder.button(text="✅ Tasdiqlash (+10,000 so'm)", callback_data=f"approve_topup_{user_id}")
+            
+            caption = f"💳 **Yangi to'lov cheki keldi!**\n\nFoydalanuvchi ID: `{user_id}`\nUsername: @{message.from_user.username or 'Mavjud emas'}"
+            
+            if message.photo:
+                await bot.send_photo(ADMIN_ID, message.photo[-1].file_id, caption=caption, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            else:
+                await bot.send_document(ADMIN_ID, message.document.file_id, caption=caption, reply_markup=builder.as_markup(), parse_mode="Markdown")
+        else:
+            await message.answer("⚠️ Iltimos, to'lov chekining skrinshotini (rasm yoki fayl ko'rinishida) yuboring.")
     else:
         await message.answer(
             "Iltimos, botdan foydalanish uchun quyidagi menyudan kerakli bo'limni tanlang:",
