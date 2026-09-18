@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import aiohttp
 from flask import Flask
 from threading import Thread
 from aiogram import Bot, Dispatcher, types
@@ -23,17 +24,17 @@ def keep_alive():
     t.start()
 
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789")) # O'zingizning Telegram ID raqamingizni yozing
+ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
+SMS_ACTIVATE_API_KEY = os.getenv("SMS_ACTIVATE_API_KEY", "")
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 translator = Translator()
 
-# Foydalanuvchi holatlari va balanslari uchun xotira
 user_states = {}
 user_balances = {}
-admin_total_revenue = 0.0  # Admin balansi (tushgan pullar)
+admin_total_revenue = 0.0
 
 def get_main_menu():
     builder = InlineKeyboardBuilder()
@@ -72,35 +73,109 @@ async def callback_handler(callback: types.CallbackQuery):
             parse_mode="Markdown"
         )
     elif data == "menu_numbers":
-        if user_id == ADMIN_ID:
-            await callback.message.answer(
-                "📱 **Virtual raqam sotib olish (Admin Rejimi):**\n\n"
-                "Siz admin bo'lganingiz uchun bu raqam sizga **tekin** taqdim etiladi! (Tez orada SMS-Activate API ulanadi)",
-                parse_mode="Markdown"
-            )
-        else:
-            await callback.message.answer(
-                "📱 **Virtual raqam sotib olish:**\n\n"
-                "Tez orada SMS-Activate API orqali avtomatik raqam sotib olish tizimi ulanadi!",
-                parse_mode="Markdown"
-            )
-    elif data == "menu_balance":
-        balance = user_balances.get(user_id, 0.0)
-        await callback.message.answer(f"💰 Sizning balansingiz: **{balance:,.2f} so'm / $**", parse_mode="Markdown")
-    elif data == "menu_topup":
+        builder = InlineKeyboardBuilder()
+        builder.button(text="📱 Telegram (Raqam olish)", callback_data="buy_tg_number")
+        builder.button(text="🔙 Ortga", callback_data="menu_back")
+        builder.adjust(1)
+        
         await callback.message.answer(
-            "💳 **Hisobni to'ldirish:**\n\n"
-            "Click, Payme yoki Telegram Stars orqali balansingizni to'ldirish funksiyasi tez kunda qo'shiladi.",
+            "📱 **Virtual raqam sotib olish:**\n\n"
+            "Qaysi servis uchun raqam kerakligini tanlang:",
+            reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
+    elif data == "buy_tg_number":
+        price = 6000.0  # Chakana narx (so'mda)
+        wholesale_price = 2500.0  # SMS-Activate tannarxi
+
+        if user_id == ADMIN_ID:
+            await callback.message.answer(
+                "👑 **Admin rejimi:** Siz uchun raqam mutlaqo **tekin** berilmoqda!\n\n"
+                "⏳ SMS-Activate API orqali haqiqiy raqam so'ralmoqda..."
+            )
+            # SMS-Activate API orqali real raqam olish so'rovi
+            if not SMS_ACTIVATE_API_KEY:
+                await callback.message.answer("⚠️ SMS_ACTIVATE_API_KEY topilmadi! Render muhitiga kalitni kiriting.")
+                return
+
+            url = f"https://api.sms-activate.org/stubs/handler_api.php?api_key={SMS_ACTIVATE_API_KEY}&action=getNumber&service=tg&country=0"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    res_text = await response.text()
+                    if "ACCESS_NUMBER" in res_text:
+                        # ACCESS_NUMBER:ACTIVATION_ID:PHONE
+                        parts = res_text.split(":")
+                        activation_id = parts[1]
+                        phone = parts[2]
+                        await callback.message.answer(f"✅ Admin uchun raqam olindi!\n📱 Raqam: `+{phone}`\n🆔 ID: `{activation_id}`", parse_mode="Markdown")
+                    else:
+                        await callback.message.answer(f"❌ Xatolik yuz berdi: {res_text}")
+        else:
+            balance = user_balances.get(user_id, 0.0)
+            if balance >= price:
+                if not SMS_ACTIVATE_API_KEY:
+                    await callback.message.answer("⚠️ Texnik xatolik: SMS-Activate API kaliti sozlanmagan.")
+                    return
+
+                url = f"https://api.sms-activate.org/stubs/handler_api.php?api_key={SMS_ACTIVATE_API_KEY}&action=getNumber&service=tg&country=0"
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as response:
+                        res_text = await response.text()
+                        if "ACCESS_NUMBER" in res_text:
+                            user_balances[user_id] -= price
+                            admin_total_revenue += (price - wholesale_price)
+                            
+                            parts = res_text.split(":")
+                            activation_id = parts[1]
+                            phone = parts[2]
+                            
+                            await callback.message.answer(
+                                f"✅ Tabriklaymiz! Hisobingizdan {price:,.2f} so'm yechildi.\n\n"
+                                f"📱 Sizning raqamingiz: `+{phone}`\n"
+                                f"🆔 ID: `{activation_id}`\n"
+                                "SMS kelishini kuting...",
+                                parse_mode="Markdown"
+                            )
+                        else:
+                            await callback.message.answer(f"⚠️ Hozirda bo'sh raqamlar yo'q yoki xatolik: {res_text}")
+            else:
+                await callback.message.answer(
+                    f"⚠️ Balansingiz yetarli emas!\n"
+                    f"Kerakli mablag': {price:,.2f} so'm\n"
+                    f"Sizning balansingiz: {balance:,.2f} so'm\n\n"
+                    "Iltimos, hisobni to'ldiring.",
+                    parse_mode="Markdown"
+                )
+    elif data == "menu_balance":
+        balance = user_balances.get(user_id, 0.0)
+        await callback.message.answer(f"💰 Sizning balansingiz: **{balance:,.2f} so'm**", parse_mode="Markdown")
+    elif data == "menu_topup":
+        builder = InlineKeyboardBuilder()
+        builder.button(text="➕ 10,000 so'm qo'shish (Test)", callback_data="topup_test")
+        builder.button(text="🔙 Ortga", callback_data="menu_back")
+        builder.adjust(1)
+        
+        await callback.message.answer(
+            "💳 **Hisobni to'ldirish:**\n\n"
+            "Hozircha test rejimida balansingizga pul qo'shib sinab ko'rishingiz mumkin:",
+            reply_markup=builder.as_markup(),
+            parse_mode="Markdown"
+        )
+    elif data == "topup_test":
+        if user_id not in user_balances:
+            user_balances[user_id] = 0.0
+        user_balances[user_id] += 10000.0
+        await callback.message.answer(f"✅ Balansingizga 10,000 so'm qo'shildi!\nJoriy balans: **{user_balances[user_id]:,.2f} so'm**", parse_mode="Markdown")
     elif data == "menu_admin":
         if user_id == ADMIN_ID:
             await callback.message.answer(
                 f"⚙️ **Admin Panel**\n\n"
-                f"📥 Tushgan umumiy mablag': **{admin_total_revenue:,.2f} so'm**\n\n"
+                f"📥 Tushgan umumiy mablag' (Sof foyda): **{admin_total_revenue:,.2f} so'm**\n\n"
                 f"Karta raqamiga o'tkazib olish uchun pastdagi tugmani bosing:",
                 reply_markup=InlineKeyboardBuilder()
                 .button(text="💸 Karta raqamiga o'tkazish", callback_data="admin_withdraw")
+                .button(text="🔙 Ortga", callback_data="menu_back")
+                .adjust(1)
                 .as_markup(),
                 parse_mode="Markdown"
             )
@@ -115,6 +190,8 @@ async def callback_handler(callback: types.CallbackQuery):
                 await callback.message.answer(f"✅ Muvaffaqiyatli! {withdrawn:,.2f} so'm mablag' kartangizga yechish uchun navbatga qo'yildi.")
             else:
                 await callback.message.answer("⚠️ Balansingizda yechib olish uchun mablag' mavjud emas.")
+    elif data == "menu_back":
+        await callback.message.answer("Asosiy menyu:", reply_markup=get_main_menu())
         
     await callback.answer()
 
