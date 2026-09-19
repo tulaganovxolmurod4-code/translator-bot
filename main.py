@@ -1,8 +1,6 @@
 import os
 import logging
 import asyncio
-import aiohttp
-from datetime import datetime
 from flask import Flask
 from threading import Thread
 from aiogram import Bot, Dispatcher, types
@@ -24,7 +22,6 @@ def keep_alive():
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
-SIM5_API_KEY = os.getenv("SIM5_API_KEY", "")
 
 # Sizning karta raqamingiz va F.I.O. (Hisobni to'ldirish uchun)
 MY_CARD_NUMBER = "5614681804146078"
@@ -34,28 +31,41 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+# Xotirada saqlanadigan ma'lumotlar bazasi
 user_states = {}
 user_balances = {}
 admin_total_revenue = 0.0
+
+# O'zingiz qo'lda qo'shadigan raqamlar bazasi
+# Format: {country_code: [ {"phone": "79...", "code": "12345"}, ... ]}
+CUSTOM_NUMBERS_STOCK = {
+    "russia": [
+        {"phone": "79991234567", "code": "Hali kelmadi"},
+        {"phone": "79997654321", "code": "Hali kelmadi"}
+    ],
+    "kazakhstan": [
+        {"phone": "77771112233", "code": "Hali kelmadi"}
+    ],
+    "usa": [
+        {"phone": "19998887766", "code": "Hali kelmadi"}
+    ]
+}
 
 COUNTRY_PRICES = {
     "russia": {
         "name": "🇷🇺 Rossiya raqami",
         "country_code": "russia",
         "retail_price": 10000.0,
-        "wholesale_cost": 2500.0
     },
     "kazakhstan": {
         "name": "🇰🇿 Qozog'iston raqami",
         "country_code": "kazakhstan",
         "retail_price": 10000.0,
-        "wholesale_cost": 3500.0
     },
     "usa": {
         "name": "🇺🇸 AQSh (USA) raqami",
         "country_code": "usa",
         "retail_price": 10000.0,
-        "wholesale_cost": 7000.0
     }
 }
 
@@ -92,8 +102,9 @@ async def callback_handler(callback: types.CallbackQuery):
     if data == "menu_numbers":
         builder = InlineKeyboardBuilder()
         for key, conf in COUNTRY_PRICES.items():
+            stock_count = len(CUSTOM_NUMBERS_STOCK.get(key, []))
             builder.button(
-                text=f"{conf['name']} — {conf['retail_price']:,.0f} so'm",
+                text=f"{conf['name']} — {conf['retail_price']:,.0f} so'm (Stokda: {stock_count})",
                 callback_data=f"buy_country_{key}"
             )
         builder.button(text="🔙 Ortga", callback_data="menu_back")
@@ -105,6 +116,7 @@ async def callback_handler(callback: types.CallbackQuery):
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
+        
     elif data.startswith("buy_country_"):
         country_key = data.replace("buy_country_", "")
         conf = COUNTRY_PRICES.get(country_key)
@@ -113,9 +125,6 @@ async def callback_handler(callback: types.CallbackQuery):
             return
 
         price = conf["retail_price"]
-        wholesale = conf["wholesale_cost"]
-        c_code = conf["country_code"]
-
         balance = user_balances.get(user_id, 0.0)
         
         if user_id != ADMIN_ID and balance < price:
@@ -129,44 +138,74 @@ async def callback_handler(callback: types.CallbackQuery):
             await callback.answer()
             return
 
-        if not SIM5_API_KEY:
-            await callback.message.answer("⚠️ Texnik xatolik: 5SIM API kaliti sozlanmagan.")
+        # Stokda raqam borligini tekshiramiz
+        stock_list = CUSTOM_NUMBERS_STOCK.get(country_key, [])
+        if not stock_list:
+            await callback.message.answer(
+                "❌ Kechirasiz, hozirda bu davlat uchun bo'sh raqamlar qolmagan!\n"
+                "Iltimos, admin raqam qo'shishini kuting yoki boshqa davlatni tanlang.",
+                parse_mode="Markdown"
+            )
             await callback.answer()
             return
 
-        if user_id == ADMIN_ID:
-            await callback.message.answer("👑 **Admin rejimi:** Siz uchun mutlaqo **tekin** raqam berilmoqda!", parse_mode="Markdown")
+        # Stokdan bitta raqamni olamiz
+        item = stock_list.pop(0)
+        phone = item["phone"]
 
-        await callback.message.answer("⏳ 5SIM API orqali raqam so'ralmoqda, iltimos kuting...")
-        url = f"https://5sim.net/v1/user/buy/activation/{c_code}/any/telegram"
-        headers = {"Authorization": f"Bearer {SIM5_API_KEY}", "Accept": "application/json"}
+        if user_id != ADMIN_ID:
+            user_balances[user_id] -= price
+            admin_total_revenue += price
+        
+        # Foydalanuvchiga raqam va SMS kodni olish tugmasini yuboramiz
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🔄 SMS kodni olish", callback_data=f"get_sms_{country_key}_{phone}")
+        builder.button(text="🔙 Asosiy menyu", callback_data="menu_back")
+        builder.adjust(1)
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    res_data = await response.json()
-                    phone = res_data.get("phone")
-                    order_id = res_data.get("id")
-                    
-                    if user_id != ADMIN_ID:
-                        user_balances[user_id] -= price
-                        admin_total_revenue += (price - wholesale)
-                    
-                    await callback.message.answer(
-                        f"✅ Tabriklaymiz! Raqam muvaffaqiyatli olindi.\n\n"
-                        f"📱 Sizning raqamingiz: `+{phone}`\n"
-                        f"🆔 Buyurtma ID: `{order_id}`\n\n"
-                        "SMS kelishini kuting...",
-                        parse_mode="Markdown"
-                    )
-                else:
-                    err_text = await response.text()
-                    await callback.message.answer(
-                        f"❌ 5SIM xatoligi: `{err_text}`\n\n"
-                        "Hozirda tanlangan davlatda stok qolmagan yoki 5SIM balansingiz yetarli emas.",
-                        parse_mode="Markdown"
-                    )
-                    
+        await callback.message.answer(
+            f"✅ Tabriklaymiz! Raqam muvaffaqiyatli olindi.\n\n"
+            f"📱 Sizning raqamingiz: `+{phone}`\n\n"
+            f"⚠️ **Ko'rsatma:**\n"
+            f"1. Telegram'ga kiring va shu raqamni yozing.\n"
+            f"2. Kod kelgach, pastdagi **'🔄 SMS kodni olish'** tugmasini bosing!",
+            reply_markup=builder.as_markup(),
+            parse_mode="Markdown"
+        )
+
+    elif data.startswith("get_sms_"):
+        # get_sms_russia_79991234567
+        parts = data.split("_")
+        country_key = parts[2]
+        phone = parts[3]
+
+        # Admin kiritgan kodni topamiz
+        current_code = "Hali kelmadi"
+        # Avval aktiv stockdan yoki admin kiritgan bazadan qidiramiz
+        # Soddaroq qilish uchun: admin kiritib qo'ygan kodni topamiz
+        found_item = None
+        for lst in CUSTOM_NUMBERS_STOCK.values():
+            for item in lst:
+                if item["phone"] == phone:
+                    found_item = item
+                    break
+
+        if found_item:
+            current_code = found_item["code"]
+        
+        await callback.message.answer(
+            f"📱 Raqam: `+{phone}`\n"
+            f"📨 Telegram SMS kodi: **{current_code}**\n\n"
+            f"*(Agar kod hali 'Hali kelmadi' bo'lsa, ozgina kuting va qayta tugmani bosing)*",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="🔄 Yangilash", callback_data=data)
+            .button(text="🔙 Asosiy menyu", callback_data="menu_back")
+            .adjust(1)
+            .as_markup(),
+            parse_mode="Markdown"
+        )
+        await callback.answer("Yangilandi!")
+
     elif data == "menu_balance":
         balance = user_balances.get(user_id, 0.0)
         await callback.message.answer(f"💰 Sizning balansingiz: **{balance:,.2f} so'm**", parse_mode="Markdown")
@@ -190,16 +229,26 @@ async def callback_handler(callback: types.CallbackQuery):
     elif data.startswith("approve_topup_"):
         if user_id == ADMIN_ID:
             target_user_id = int(data.split("_")[2])
-            topup_amount = 10000.0 # Standart to'lov summasi yoki o'zgartirish mumkin
+            topup_amount = 10000.0 # Standart to'lov summasi
             
             if target_user_id not in user_balances:
                 user_balances[target_user_id] = 0.0
             user_balances[target_user_id] += topup_amount
             
-            await callback.message.edit_caption(
-                caption=callback.message.caption + "\n\n✅ **HOLAT: Tasdiqlandi va mablag' qo'shildi!**",
-                parse_mode="Markdown"
-            )
+            try:
+                await callback.message.edit_caption(
+                    caption=callback.message.caption + "\n\n✅ **HOLAT: Tasdiqlandi va mablag' qo'shildi!**",
+                    reply_markup=None
+                )
+            except Exception:
+                try:
+                    await callback.message.edit_text(
+                        text=callback.message.text + "\n\n✅ **HOLAT: Tasdiqlandi va mablag' qo'shildi!**",
+                        reply_markup=None
+                    )
+                except Exception:
+                    pass
+
             try:
                 await bot.send_message(
                     target_user_id,
@@ -218,10 +267,10 @@ async def callback_handler(callback: types.CallbackQuery):
         if user_id == ADMIN_ID:
             await callback.message.answer(
                 f"⚙️ **Admin Panel**\n\n"
-                f"📥 Tushgan umumiy mablag' (Sof foyda): **{admin_total_revenue:,.2f} so'm**\n\n"
-                f"Karta raqamiga o'tkazib olish uchun pastdagi tugmani bosing:",
+                f"📥 Tushgan umumiy mablag': **{admin_total_revenue:,.2f} so'm**\n\n"
+                f"Kerakli amalni tanlang:",
                 reply_markup=InlineKeyboardBuilder()
-                .button(text="💸 Karta raqamiga o'tkazish", callback_data="admin_withdraw")
+                .button(text="➕ Raqam va SMS qo'shish", callback_data="admin_add_number")
                 .button(text="🔙 Ortga", callback_data="menu_back")
                 .adjust(1)
                 .as_markup(),
@@ -229,15 +278,20 @@ async def callback_handler(callback: types.CallbackQuery):
             )
         else:
             await callback.answer("Siz admin emassiz!", show_alert=True)
-            
-    elif data == "admin_withdraw":
+
+    elif data == "admin_add_number":
         if user_id == ADMIN_ID:
-            if admin_total_revenue > 0:
-                withdrawn = admin_total_revenue
-                admin_total_revenue = 0.0
-                await callback.message.answer(f"✅ Muvaffaqiyatli! {withdrawn:,.2f} so'm mablag' kartangizga yechish uchun navbatga qo'yildi.")
-            else:
-                await callback.message.answer("⚠️ Balansingizda yechib olish uchun mablag' mavjud emas.")
+            user_states[user_id] = "waiting_for_admin_number"
+            await callback.message.answer(
+                "➕ **Yangi raqam va kod qo'shish:**\n\n"
+                "Quyidagi formatda yuboring:\n"
+                "`davlat, raqam, sms_kod`\n\n"
+                "Namuna:\n"
+                `russia, 79991234567, 54321`\n\n"
+                "*(Davlatlar: russia, kazakhstan, usa)*",
+                parse_mode="Markdown"
+            )
+            
     elif data == "menu_back":
         user_states[user_id] = None
         await callback.message.answer("Asosiy menyu:", reply_markup=get_main_menu())
@@ -249,13 +303,39 @@ async def handle_text(message: types.Message):
     user_id = message.from_user.id
     state = user_states.get(user_id)
 
+    if user_id == ADMIN_ID and state == "waiting_for_admin_number":
+        # Admin raqam qo'shmoqda: russia, 79991234567, 54321
+        try:
+            text = message.text.strip()
+            parts = [p.strip() for p in text.split(",")]
+            country = parts[0]
+            phone = parts[1]
+            code = parts[2]
+
+            if country not in CUSTOM_NUMBERS_STOCK:
+                CUSTOM_NUMBERS_STOCK[country] = []
+            
+            CUSTOM_NUMBERS_STOCK[country].append({"phone": phone, "code": code})
+            user_states[user_id] = None
+
+            await message.answer(
+                f"✅ **Muvaffaqiyatli qo'shildi!**\n"
+                f"Davlat: `{country}`\n"
+                f"Raqam: `+{phone}`\n"
+                f"SMS Kod: `{code}`",
+                parse_mode="Markdown",
+                reply_markup=get_main_menu()
+            )
+        except Exception as e:
+            await message.answer("⚠️ Xatolik! Formatni to'g'ri kiriting:\n`russia, 79991234567, 54321`", parse_mode="Markdown")
+        return
+
     if state == "waiting_for_receipt":
         if message.photo or message.document:
             user_states[user_id] = None
             
             await message.answer("✅ To'lov cheki qabul qilindi! Admin tekshirishi uchun yuborildi. Iltimos kuting...")
             
-            # Adminga yuborish
             caption = (
                 f"💳 **Yangi to'lov cheki keldi!**\n\n"
                 f"👤 Foydalanuvchi ID: `{user_id}`\n"
