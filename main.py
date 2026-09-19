@@ -23,7 +23,6 @@ def keep_alive():
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 
-# Sizning karta raqamingiz va F.I.O. (Hisobni to'ldirish uchun)
 MY_CARD_NUMBER = "5614681804146078"
 MY_CARD_HOLDER = "Tulaganov Xolmurod"
 
@@ -31,13 +30,10 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Xotirada saqlanadigan ma'lumotlar bazasi
 user_states = {}
 user_balances = {}
 admin_total_revenue = 0.0
 
-# O'zingiz qo'lda qo'shadigan raqamlar bazasi
-# Format: {country_code: [ {"phone": "79...", "code": "12345"}, ... ]}
 CUSTOM_NUMBERS_STOCK = {
     "russia": [
         {"phone": "79991234567", "code": "Hali kelmadi"},
@@ -138,7 +134,6 @@ async def callback_handler(callback: types.CallbackQuery):
             await callback.answer()
             return
 
-        # Stokda raqam borligini tekshiramiz
         stock_list = CUSTOM_NUMBERS_STOCK.get(country_key, [])
         if not stock_list:
             await callback.message.answer(
@@ -149,7 +144,6 @@ async def callback_handler(callback: types.CallbackQuery):
             await callback.answer()
             return
 
-        # Stokdan bitta raqamni olamiz
         item = stock_list.pop(0)
         phone = item["phone"]
 
@@ -157,7 +151,6 @@ async def callback_handler(callback: types.CallbackQuery):
             user_balances[user_id] -= price
             admin_total_revenue += price
         
-        # Foydalanuvchiga raqam va SMS kodni olish tugmasini yuboramiz
         builder = InlineKeyboardBuilder()
         builder.button(text="🔄 SMS kodni olish", callback_data=f"get_sms_{country_key}_{phone}")
         builder.button(text="🔙 Asosiy menyu", callback_data="menu_back")
@@ -174,15 +167,10 @@ async def callback_handler(callback: types.CallbackQuery):
         )
 
     elif data.startswith("get_sms_"):
-        # get_sms_russia_79991234567
         parts = data.split("_")
         country_key = parts[2]
         phone = parts[3]
 
-        # Admin kiritgan kodni topamiz
-        current_code = "Hali kelmadi"
-        # Avval aktiv stockdan yoki admin kiritgan bazadan qidiramiz
-        # Soddaroq qilish uchun: admin kiritib qo'ygan kodni topamiz
         found_item = None
         for lst in CUSTOM_NUMBERS_STOCK.values():
             for item in lst:
@@ -190,8 +178,7 @@ async def callback_handler(callback: types.CallbackQuery):
                     found_item = item
                     break
 
-        if found_item:
-            current_code = found_item["code"]
+        current_code = found_item["code"] if found_item else "Hali kelmadi"
         
         await callback.message.answer(
             f"📱 Raqam: `+{phone}`\n"
@@ -229,7 +216,7 @@ async def callback_handler(callback: types.CallbackQuery):
     elif data.startswith("approve_topup_"):
         if user_id == ADMIN_ID:
             target_user_id = int(data.split("_")[2])
-            topup_amount = 10000.0 # Standart to'lov summasi
+            topup_amount = 10000.0
             
             if target_user_id not in user_balances:
                 user_balances[target_user_id] = 0.0
@@ -287,7 +274,7 @@ async def callback_handler(callback: types.CallbackQuery):
                 "Quyidagi formatda yuboring:\n"
                 "`davlat, raqam, sms_kod`\n\n"
                 "Namuna:\n"
-                `russia, 79991234567, 54321`\n\n"
+                "russia, 79991234567, 54321\n\n"
                 "*(Davlatlar: russia, kazakhstan, usa)*",
                 parse_mode="Markdown"
             )
@@ -304,7 +291,6 @@ async def handle_text(message: types.Message):
     state = user_states.get(user_id)
 
     if user_id == ADMIN_ID and state == "waiting_for_admin_number":
-        # Admin raqam qo'shmoqda: russia, 79991234567, 54321
         try:
             text = message.text.strip()
             parts = [p.strip() for p in text.split(",")]
